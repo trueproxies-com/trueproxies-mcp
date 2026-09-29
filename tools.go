@@ -113,7 +113,7 @@ type endpointsIn struct {
 	ServiceID string `json:"service_id" jsonschema:"Service ID (a UUID) from list_services"`
 	Protocol  string `json:"protocol,omitempty" jsonschema:"http, https or socks5"`
 	Format    string `json:"format,omitempty" jsonschema:"Line format: host:port:user:pass (default), user:pass@host:port, user:pass, host:port, url or curl"`
-	Count     int    `json:"count,omitempty" jsonschema:"How many lines, 1 to 1000. Default 1."`
+	Count     int    `json:"count,omitempty" jsonschema:"With session sticky, how many sticky sessions to return, 1 to 1000. Other session types return one line."`
 	Country   string `json:"country,omitempty" jsonschema:"Two-letter country code, if the service supports country targeting"`
 	City      string `json:"city,omitempty" jsonschema:"City in lowercase letters, digits and underscores, if the service supports city targeting"`
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
@@ -200,7 +200,7 @@ func (t *tools) register(s *mcp.Server) {
 	})
 
 	mcp.AddTool(s, tool("generate_endpoints", "Generate endpoints",
-		"Builds 1 to 1,000 proxy connection lines for a service with the chosen protocol, format, location targeting and session type. Does not change the service. The output contains the proxy username and password, which let anyone who has them use the service.",
+		"Builds proxy connection lines for a service with the chosen protocol, format, location targeting and session type: one line, or up to 1,000 sticky sessions with session sticky. Does not change the service. The output contains the proxy username and password, which let anyone who has them use the service.",
 		false), func(ctx context.Context, req *mcp.CallToolRequest, in endpointsIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)

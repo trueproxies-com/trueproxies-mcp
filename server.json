@@ -3,7 +3,7 @@
   "name": "com.trueproxies/mcp",
   "title": "TrueProxies",
   "description": "Plans, services, usage, invoices, endpoints and connection checks for your TrueProxies account",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "websiteUrl": "https://trueproxies.com",
   "repository": {
     "url": "https://github.com/trueproxies-com/trueproxies-mcp",
