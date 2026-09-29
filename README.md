@@ -47,14 +47,18 @@ Cursor and other clients (`mcp.json`):
 }
 ```
 
-Local, with Docker:
+Local, with Docker. Build the image once:
+
+```bash
+docker build -t trueproxies-mcp https://github.com/trueproxies-com/trueproxies-mcp.git
+```
 
 ```json
 {
   "mcpServers": {
     "trueproxies": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "-e", "TRUEPROXIES_API_KEY", "ghcr.io/trueproxies-com/trueproxies-mcp"],
+      "args": ["run", "-i", "--rm", "-e", "TRUEPROXIES_API_KEY", "trueproxies-mcp"],
       "env": { "TRUEPROXIES_API_KEY": "tp_api_..." }
     }
   }
