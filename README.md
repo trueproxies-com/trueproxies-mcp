@@ -23,7 +23,7 @@ The server cannot buy, pay, change your proxy password or change trusted IPs. Ev
 
 ## API key
 
-Create an API key in the [TrueProxies dashboard](https://dashboard.trueproxies.com) under API keys. For read-only use, give it `services:read` and `billing:read`. Add `proxy:read` only if the assistant should generate endpoints or check connections: endpoints contain your proxy password.
+Create an API key in the [TrueProxies dashboard](https://dashboard.trueproxies.com) under API keys. For read-only use, give it `services:read` and `billing:read`. Add `proxy:read` only if the assistant should generate endpoints, check connections or list trusted IPs: endpoints contain your proxy password.
 
 ## Connect
 
@@ -69,7 +69,7 @@ Local, with Go: `go install github.com/trueproxies-com/trueproxies-mcp@latest`, 
 
 ## Privacy
 
-The hosted server forwards your API key to `api.trueproxies.com` for each call and keeps nothing. It logs the tool name, status, request ID and duration, never arguments, results or keys.
+The hosted server forwards your API key to `api.trueproxies.com` for each call and keeps nothing. It logs the tool name, status, request ID and duration, never arguments, results or keys. `mcp.trueproxies.com` is served through Cloudflare, which decrypts traffic in transit like any Cloudflare-proxied site, so your API key and any endpoints pass through Cloudflare. To avoid that, run the server locally.
 
 ## Links
 

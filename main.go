@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -19,7 +20,14 @@ import (
 )
 
 // version is set at build time with -ldflags "-X main.version=1.0.0".
+// go install builds take it from the module version instead.
 var version = "dev"
+
+func init() {
+	if bi, ok := debug.ReadBuildInfo(); ok && version == "dev" && strings.HasPrefix(bi.Main.Version, "v") {
+		version = strings.TrimPrefix(bi.Main.Version, "v")
+	}
+}
 
 const usage = `usage:
   trueproxies-mcp stdio                serve over stdin and stdout; API key from TRUEPROXIES_API_KEY
@@ -60,7 +68,9 @@ func main() {
 			&mcp.StreamableHTTPOptions{Stateless: true}))
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 		hs := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		drained := make(chan struct{})
 		go func() {
+			defer close(drained)
 			<-ctx.Done()
 			shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -70,6 +80,8 @@ func main() {
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}
+		// Shutdown makes ListenAndServe return at once; wait for in-flight calls.
+		<-drained
 	default:
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +22,9 @@ const catalogTTL = 5 * time.Minute
 // maxResponse caps an API response body; 1,000 endpoints fit well inside it.
 const maxResponse = 4 << 20
 
+// errTooLarge reports an API response over maxResponse.
+var errTooLarge = errors.New("API response larger than 4 MB")
+
 // apiClient calls the TrueProxies customer API. It holds no credentials: each
 // call carries the caller's Authorization header value.
 type apiClient struct {
@@ -27,9 +32,10 @@ type apiClient struct {
 	userAgent string
 	http      *http.Client
 
-	mu        sync.Mutex
-	catalog   []byte
-	catalogAt time.Time
+	mu         sync.Mutex
+	catalog    []byte
+	catalogAt  time.Time
+	refreshing bool
 }
 
 // apiError is a non-2xx API response. The API's body is {"code","message"}.
@@ -86,9 +92,12 @@ func (c *apiClient) do(ctx context.Context, method, path string, query url.Value
 	}
 	defer resp.Body.Close()
 	rid := resp.Header.Get("X-Request-ID")
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil {
 		return nil, rid, err
+	}
+	if len(data) > maxResponse {
+		return nil, rid, errTooLarge
 	}
 	if resp.StatusCode >= 300 {
 		e := &apiError{Status: resp.StatusCode, RequestID: rid, RetryAfter: resp.Header.Get("Retry-After")}
@@ -104,15 +113,29 @@ func (c *apiClient) do(ctx context.Context, method, path string, query url.Value
 	return data, rid, nil
 }
 
-// publicCatalog returns the public catalog, reused for catalogTTL.
+// publicCatalog returns the public catalog, reused for catalogTTL. While one
+// call refreshes it, others get the cached copy, and a failed refresh serves
+// the cached copy instead of an error.
 func (c *apiClient) publicCatalog(ctx context.Context) ([]byte, string, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.catalog != nil && time.Since(c.catalogAt) < catalogTTL {
-		return c.catalog, "", nil
+	if c.catalog != nil && (c.refreshing || time.Since(c.catalogAt) < catalogTTL) {
+		data := c.catalog
+		c.mu.Unlock()
+		return data, "", nil
 	}
+	c.refreshing = true
+	c.mu.Unlock()
+
 	data, rid, err := c.do(ctx, http.MethodGet, "/v1/catalog", nil, nil, "")
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refreshing = false
 	if err != nil {
+		if c.catalog != nil {
+			log.Printf("catalog refresh failed, serving the cached catalog: %v", err)
+			return c.catalog, rid, nil
+		}
 		return nil, rid, err
 	}
 	c.catalog, c.catalogAt = data, time.Now()

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -78,8 +79,8 @@ type serviceIn struct {
 
 type listServicesIn struct {
 	View   string `json:"view,omitempty" jsonschema:"current (default) lists every service that is not closed; history lists closed services; all lists both"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Cursor from the previous page"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Page size"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"next_cursor from the previous page"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Page size, 1 to 100. Default 25."`
 }
 
 type usageHistoryIn struct {
@@ -91,8 +92,8 @@ type listInvoicesIn struct {
 	ServiceID string `json:"service_id,omitempty" jsonschema:"Only invoices for this service ID (a UUID)"`
 	Status    string `json:"status,omitempty" jsonschema:"open, paid or cancelled"`
 	Kind      string `json:"kind,omitempty" jsonschema:"purchase, renewal, topup, custom, wallet_topup or white_label"`
-	Cursor    string `json:"cursor,omitempty" jsonschema:"Cursor from the previous page"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"Page size"`
+	Cursor    string `json:"cursor,omitempty" jsonschema:"next_cursor from the previous page"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"Page size, 1 to 100. Default 25."`
 }
 
 type invoiceIn struct {
@@ -107,7 +108,7 @@ type checkIn struct {
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
 	ASN       string `json:"asn,omitempty" jsonschema:"ASN digits without the AS prefix, if the service supports ASN targeting"`
 	Session   string `json:"session,omitempty" jsonschema:"Session type. sticky (Sticky) reuses an IP while available, for the session lifetime. rotate (Rotating) requests a new IP per connection, and the same IP can appear again. none uses the service default."`
-	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, 60 to 86400, only with session sticky"`
+	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, only with session sticky: 60 to 86400, or from 1 when the service has session_lifetime_seconds, at most 1800 with session_lifetime_30m, and whole minutes on Residential IPv4 Unlimited"`
 }
 
 type endpointsIn struct {
@@ -120,13 +121,45 @@ type endpointsIn struct {
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
 	ASN       string `json:"asn,omitempty" jsonschema:"ASN digits without the AS prefix, if the service supports ASN targeting"`
 	Session   string `json:"session,omitempty" jsonschema:"Session type. sticky (Sticky) reuses an IP while available, for the session lifetime. rotate (Rotating) requests a new IP per connection, and the same IP can appear again. none uses the service default."`
-	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, 60 to 86400, only with session sticky"`
+	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, only with session sticky: 60 to 86400, or from 1 when the service has session_lifetime_seconds, at most 1800 with session_lifetime_30m, and whole minutes on Residential IPv4 Unlimited"`
+}
+
+// The values the API accepts, so clients can offer them and bad values fail
+// before any request.
+var (
+	protocols   = []any{"http", "https", "socks5"}
+	sessions    = []any{"none", "sticky", "rotate"}
+	targetEnums = map[string][]any{"protocol": protocols, "session": sessions}
+	pageSize    = map[string][2]float64{"limit": {1, 100}}
+)
+
+// input infers T's input schema, restricts the named properties to the listed
+// values and sets numeric bounds.
+func input[T any](enums map[string][]any, bounds map[string][2]float64) *jsonschema.Schema {
+	s, err := jsonschema.For[T](nil)
+	if err != nil {
+		panic(err)
+	}
+	for name, values := range enums {
+		s.Properties[name].Enum = values
+	}
+	for name, b := range bounds {
+		lo, hi := b[0], b[1]
+		s.Properties[name].Minimum, s.Properties[name].Maximum = &lo, &hi
+	}
+	return s
+}
+
+// with sets a tool's input schema.
+func with(t *mcp.Tool, s *jsonschema.Schema) *mcp.Tool {
+	t.InputSchema = s
+	return t
 }
 
 func (t *tools) register(s *mcp.Server) {
-	mcp.AddTool(s, tool("list_plans", "List plans and prices",
+	mcp.AddTool(s, with(tool("list_plans", "List plans and prices",
 		"Lists TrueProxies plans and traffic packs: price in US cents, term, speed, connection limits, traffic allowance and targeting capabilities. Also returns the cities available for city targeting and whether the free trial is open. Traffic packs (residential_ipv4_gb) have no term; their traffic is valid for 30 days. No API key needed.",
-		true, false), t.listPlans)
+		true, false), input[plansIn](map[string][]any{"product": {"datacenter_ipv6", "residential_ipv4_unlimited", "residential_ipv4_gb"}, "term": {"hour", "day", "week", "month"}}, nil)), t.listPlans)
 
 	mcp.AddTool(s, tool("get_account", "Get your account",
 		"Returns the TrueProxies account that owns the API key: account reference, email, role, status and billing details.",
@@ -134,9 +167,9 @@ func (t *tools) register(s *mcp.Server) {
 		return t.call(ctx, req, "get_account", scopeServices, http.MethodGet, "/v1/me", nil, nil)
 	})
 
-	mcp.AddTool(s, tool("list_services", "List your services",
+	mcp.AddTool(s, with(tool("list_services", "List your services",
 		"Lists the services on the account with status, product, plan, expiry and connection hosts. Paginated: pass next_cursor from the previous response as cursor.",
-		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in listServicesIn) (*mcp.CallToolResult, any, error) {
+		true, false), input[listServicesIn](map[string][]any{"view": {"current", "history", "all"}}, pageSize)), func(ctx context.Context, req *mcp.CallToolRequest, in listServicesIn) (*mcp.CallToolResult, any, error) {
 		q := query("view", in.View, "cursor", in.Cursor, "limit", num(in.Limit))
 		return t.call(ctx, req, "list_services", scopeServices, http.MethodGet, "/v1/services", q, nil)
 	})
@@ -169,9 +202,9 @@ func (t *tools) register(s *mcp.Server) {
 		return t.call(ctx, req, "get_live_traffic", scopeServices, http.MethodGet, "/v1/services/"+in.ServiceID+"/live-metrics", nil, nil)
 	})
 
-	mcp.AddTool(s, tool("get_usage_history", "Get usage history",
+	mcp.AddTool(s, with(tool("get_usage_history", "Get usage history",
 		"Returns usage history for one service, or for the whole account when service_id is empty: connection success, traffic and connection errors over the last 24h, 7d or 30d. In series, bytes_out is downloaded and bytes_in is uploaded. Can lag recent traffic.",
-		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in usageHistoryIn) (*mcp.CallToolResult, any, error) {
+		true, false), input[usageHistoryIn](map[string][]any{"range": {"24h", "7d", "30d"}}, nil)), func(ctx context.Context, req *mcp.CallToolRequest, in usageHistoryIn) (*mcp.CallToolResult, any, error) {
 		path := "/v1/analytics"
 		if in.ServiceID != "" {
 			if !uuidPattern.MatchString(in.ServiceID) {
@@ -182,9 +215,9 @@ func (t *tools) register(s *mcp.Server) {
 		return t.call(ctx, req, "get_usage_history", scopeServices, http.MethodGet, path, query("range", in.Range), nil)
 	})
 
-	mcp.AddTool(s, tool("list_invoices", "List invoices",
-		"Lists invoices with status (open, paid or cancelled), kind, amount in cents and the service each belongs to. Paginated: pass the cursor from the previous response to get the next page.",
-		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in listInvoicesIn) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(s, with(tool("list_invoices", "List invoices",
+		"Lists invoices with status (open, paid or cancelled), kind, amount in cents and the service each belongs to. Paginated: pass next_cursor from the previous response as cursor.",
+		true, false), input[listInvoicesIn](map[string][]any{"status": {"open", "paid", "cancelled"}, "kind": {"purchase", "renewal", "topup", "custom", "wallet_topup", "white_label"}}, pageSize)), func(ctx context.Context, req *mcp.CallToolRequest, in listInvoicesIn) (*mcp.CallToolResult, any, error) {
 		if in.ServiceID != "" && !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -201,9 +234,9 @@ func (t *tools) register(s *mcp.Server) {
 		return t.call(ctx, req, "get_invoice", scopeBilling, http.MethodGet, "/v1/invoices/"+in.InvoiceID, nil, nil)
 	})
 
-	mcp.AddTool(s, tool("generate_endpoints", "Generate endpoints",
+	mcp.AddTool(s, with(tool("generate_endpoints", "Generate endpoints",
 		"Builds proxy connection lines for a service with the chosen protocol, format, location targeting and session type: one line, or up to 1,000 sticky sessions with session sticky. Does not change the service. The output contains the proxy username and password, which let anyone who has them use the service.",
-		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in endpointsIn) (*mcp.CallToolResult, any, error) {
+		true, false), input[endpointsIn](map[string][]any{"protocol": protocols, "session": sessions, "format": {"host:port:user:pass", "user:pass@host:port", "user:pass", "host:port", "url", "curl"}}, map[string][2]float64{"count": {1, 1000}, "lifetime": {1, 86400}})), func(ctx context.Context, req *mcp.CallToolRequest, in endpointsIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -217,9 +250,9 @@ func (t *tools) register(s *mcp.Server) {
 		return t.call(ctx, req, "generate_endpoints", scopeProxy, http.MethodPost, "/v1/services/"+in.ServiceID+"/endpoints", nil, body)
 	})
 
-	mcp.AddTool(s, tool("check_connection", "Check connection",
+	mcp.AddTool(s, with(tool("check_connection", "Check connection",
 		"Sends one request through the service from TrueProxies and reports the outcome and exit IP, to tell a proxy problem apart from a website refusing you. It counts as use of the service: it uses a little traffic and starts an unused free trial. Does not measure speed. Limited to a few checks a minute.",
-		false, true), func(ctx context.Context, req *mcp.CallToolRequest, in checkIn) (*mcp.CallToolResult, any, error) {
+		false, true), input[checkIn](targetEnums, map[string][2]float64{"lifetime": {1, 86400}})), func(ctx context.Context, req *mcp.CallToolRequest, in checkIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -294,7 +327,10 @@ func (t *tools) call(ctx context.Context, req *mcp.CallToolRequest, name, scope,
 // the request's Authorization header or body.
 func toolError(name, scope string, err error) string {
 	var ae *apiError
-	if !errors.As(err, &ae) {
+	switch {
+	case errors.Is(err, errTooLarge):
+		return "The answer is larger than 4 MB. Ask for fewer items."
+	case !errors.As(err, &ae):
 		return "The TrueProxies API could not be reached: " + err.Error()
 	}
 	ref := ""
@@ -304,7 +340,7 @@ func toolError(name, scope string, err error) string {
 	switch {
 	case ae.Status == http.StatusUnauthorized:
 		return "The API key is invalid, expired or revoked." + ref
-	case ae.Status == http.StatusForbidden && scope != "":
+	case ae.Status == http.StatusForbidden && scope != "" && strings.Contains(ae.Message, "does not have permission"):
 		return fmt.Sprintf("%s. This tool needs an API key with the %s scope.%s", strings.TrimRight(ae.Message, "."), scope, ref)
 	case ae.Status == http.StatusNotFound:
 		return "No service or invoice with that ID on this account." + ref
