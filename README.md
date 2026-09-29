@@ -2,7 +2,7 @@
 
 Connect Claude, Cursor or any MCP client to your [TrueProxies](https://trueproxies.com) account. Ask about plans and prices, your services, traffic used, live traffic, usage history and invoices, generate endpoints and check a connection.
 
-The server is read-only. It cannot buy, pay, change your proxy password or change trusted IPs.
+The server cannot buy, pay, change your proxy password or change trusted IPs. Every tool only reads, except `check_connection`, which sends one request through your service.
 
 ## Tools
 
@@ -18,7 +18,7 @@ The server is read-only. It cannot buy, pay, change your proxy password or chang
 | `list_invoices` | Your invoices | `billing:read` |
 | `get_invoice` | One invoice | `billing:read` |
 | `generate_endpoints` | Proxy connection lines, including the username and password | `proxy:read` |
-| `check_connection` | The result and exit IP of one request through your service | `proxy:read` |
+| `check_connection` | The result and exit IP of one request through your service. It uses a little traffic and starts an unused free trial. | `proxy:read` |
 | `list_trusted_ips` | Trusted IPs of a service | `proxy:read` |
 
 ## API key
@@ -34,14 +34,14 @@ claude mcp add --transport http trueproxies https://mcp.trueproxies.com/mcp \
   --header "Authorization: Bearer $TRUEPROXIES_API_KEY"
 ```
 
-Cursor and other clients (`mcp.json`):
+Cursor (`~/.cursor/mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "trueproxies": {
       "url": "https://mcp.trueproxies.com/mcp",
-      "headers": { "Authorization": "Bearer ${TRUEPROXIES_API_KEY}" }
+      "headers": { "Authorization": "Bearer ${env:TRUEPROXIES_API_KEY}" }
     }
   }
 }

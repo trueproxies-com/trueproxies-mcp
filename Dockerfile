@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags 
 FROM gcr.io/distroless/static-debian12:nonroot
 LABEL io.modelcontextprotocol.server.name="com.trueproxies/mcp" \
       org.opencontainers.image.source="https://github.com/trueproxies-com/trueproxies-mcp" \
-      org.opencontainers.image.description="MCP server for TrueProxies proxy accounts" \
+      org.opencontainers.image.description="MCP server for your TrueProxies account" \
       org.opencontainers.image.licenses="MIT"
 COPY --from=build /trueproxies-mcp /trueproxies-mcp
 ENTRYPOINT ["/trueproxies-mcp"]

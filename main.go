@@ -40,10 +40,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "stdio":
-		auth := ""
-		if key := strings.TrimSpace(os.Getenv("TRUEPROXIES_API_KEY")); key != "" {
-			auth = "Bearer " + strings.TrimPrefix(key, "Bearer ")
-		}
+		auth := bearer(os.Getenv("TRUEPROXIES_API_KEY"))
 		srv := newServer(api, func(*mcp.CallToolRequest) string { return auth })
 		if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
 			log.Fatal(err)
@@ -56,7 +53,7 @@ func main() {
 			if req.Extra == nil {
 				return ""
 			}
-			return req.Extra.Header.Get("Authorization")
+			return bearer(req.Extra.Header.Get("Authorization"))
 		})
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
@@ -77,4 +74,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
+}
+
+// bearer turns an API key, with or without its "Bearer " prefix, into an
+// Authorization header value. It returns "" when no key is present, so a
+// header that holds only "Bearer" counts as no key.
+func bearer(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) >= 6 && strings.EqualFold(v[:6], "bearer") {
+		v = strings.TrimSpace(v[6:])
+	}
+	if v == "" {
+		return ""
+	}
+	return "Bearer " + v
 }

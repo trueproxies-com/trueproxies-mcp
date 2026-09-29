@@ -49,9 +49,10 @@ func newServer(api *apiClient, auth authFunc) *mcp.Server {
 	return s
 }
 
-// tool describes a read-only tool. openWorld marks tools that reach outside
-// the customer's own account data.
-func tool(name, title, description string, openWorld bool) *mcp.Tool {
+// tool describes a tool that changes nothing on the account. readOnly is false
+// for tools that use the service itself, and openWorld marks tools that reach
+// outside the customer's own account data.
+func tool(name, title, description string, readOnly, openWorld bool) *mcp.Tool {
 	no := false
 	return &mcp.Tool{
 		Name:        name,
@@ -59,7 +60,7 @@ func tool(name, title, description string, openWorld bool) *mcp.Tool {
 		Description: description,
 		Annotations: &mcp.ToolAnnotations{
 			Title:           title,
-			ReadOnlyHint:    true,
+			ReadOnlyHint:    readOnly,
 			DestructiveHint: &no,
 			OpenWorldHint:   &openWorld,
 		},
@@ -105,7 +106,7 @@ type checkIn struct {
 	City      string `json:"city,omitempty" jsonschema:"City in lowercase letters, digits and underscores, if the service supports city targeting"`
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
 	ASN       string `json:"asn,omitempty" jsonschema:"ASN digits without the AS prefix, if the service supports ASN targeting"`
-	Session   string `json:"session,omitempty" jsonschema:"Session type: sticky reuses an IP for the session lifetime; rotate gives a new IP per connection and the same IP can appear again; none uses the service default"`
+	Session   string `json:"session,omitempty" jsonschema:"Session type. sticky (Sticky) reuses an IP while available, for the session lifetime. rotate (Rotating) requests a new IP per connection, and the same IP can appear again. none uses the service default."`
 	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, 60 to 86400, only with session sticky"`
 }
 
@@ -118,31 +119,31 @@ type endpointsIn struct {
 	City      string `json:"city,omitempty" jsonschema:"City in lowercase letters, digits and underscores, if the service supports city targeting"`
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
 	ASN       string `json:"asn,omitempty" jsonschema:"ASN digits without the AS prefix, if the service supports ASN targeting"`
-	Session   string `json:"session,omitempty" jsonschema:"Session type: sticky reuses an IP for the session lifetime; rotate gives a new IP per connection and the same IP can appear again; none uses the service default"`
+	Session   string `json:"session,omitempty" jsonschema:"Session type. sticky (Sticky) reuses an IP while available, for the session lifetime. rotate (Rotating) requests a new IP per connection, and the same IP can appear again. none uses the service default."`
 	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, 60 to 86400, only with session sticky"`
 }
 
 func (t *tools) register(s *mcp.Server) {
 	mcp.AddTool(s, tool("list_plans", "List plans and prices",
 		"Lists TrueProxies plans and traffic packs: price in US cents, term, speed, connection limits, traffic allowance and targeting capabilities. Also returns the cities available for city targeting and whether the free trial is open. Traffic packs (residential_ipv4_gb) have no term; their traffic is valid for 30 days. No API key needed.",
-		false), t.listPlans)
+		true, false), t.listPlans)
 
 	mcp.AddTool(s, tool("get_account", "Get your account",
 		"Returns the TrueProxies account that owns the API key: account reference, email, role, status and billing details.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 		return t.call(ctx, req, "get_account", scopeServices, http.MethodGet, "/v1/me", nil, nil)
 	})
 
 	mcp.AddTool(s, tool("list_services", "List your services",
 		"Lists the services on the account with status, product, plan, expiry and connection hosts. Paginated: pass next_cursor from the previous response as cursor.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in listServicesIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in listServicesIn) (*mcp.CallToolResult, any, error) {
 		q := query("view", in.View, "cursor", in.Cursor, "limit", num(in.Limit))
 		return t.call(ctx, req, "list_services", scopeServices, http.MethodGet, "/v1/services", q, nil)
 	})
 
 	mcp.AddTool(s, tool("get_service", "Get a service",
 		"Returns one service: status, expiry, connection hosts and ports, capabilities (the targeting and session options it supports) and effective limits. Does not return the proxy password.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -150,17 +151,18 @@ func (t *tools) register(s *mcp.Server) {
 	})
 
 	mcp.AddTool(s, tool("get_traffic_used", "Get traffic used and remaining",
-		"Returns traffic used for one service and, for traffic packs, traffic remaining. Counters are bytes; GB values are decimal (1 GB = 1,000,000,000 bytes). Traffic can take about a minute to appear.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
+		"Returns traffic for one service, in bytes: bytes_out is downloaded and bytes_in is uploaded since the service started, remaining_bytes is traffic remaining and allowance_bytes is the allowance. traffic_batches lists traffic packs with their expiry. Traffic can take about a minute to appear.",
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
-		return t.call(ctx, req, "get_traffic_used", scopeServices, http.MethodGet, "/v1/services/"+in.ServiceID+"/usage", nil, nil)
+		res, _, _ := t.call(ctx, req, "get_traffic_used", scopeServices, http.MethodGet, "/v1/services/"+in.ServiceID+"/usage", nil, nil)
+		return without(res, providerFields...), nil, nil
 	})
 
 	mcp.AddTool(s, tool("get_live_traffic", "Get live traffic",
 		"Returns live traffic for one service: download and upload speed in bits per second over the last ten seconds, traffic used today (UTC) and recent connection outcomes. last_activity_at shows how fresh the data is.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -168,8 +170,8 @@ func (t *tools) register(s *mcp.Server) {
 	})
 
 	mcp.AddTool(s, tool("get_usage_history", "Get usage history",
-		"Returns usage history for one service, or for the whole account when service_id is empty: connection success, traffic and connection errors over the last 24h, 7d or 30d. Can lag recent traffic.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in usageHistoryIn) (*mcp.CallToolResult, any, error) {
+		"Returns usage history for one service, or for the whole account when service_id is empty: connection success, traffic and connection errors over the last 24h, 7d or 30d. In series, bytes_out is downloaded and bytes_in is uploaded. Can lag recent traffic.",
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in usageHistoryIn) (*mcp.CallToolResult, any, error) {
 		path := "/v1/analytics"
 		if in.ServiceID != "" {
 			if !uuidPattern.MatchString(in.ServiceID) {
@@ -182,7 +184,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	mcp.AddTool(s, tool("list_invoices", "List invoices",
 		"Lists invoices with status (open, paid or cancelled), kind, amount in cents and the service each belongs to. Paginated: pass the cursor from the previous response to get the next page.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in listInvoicesIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in listInvoicesIn) (*mcp.CallToolResult, any, error) {
 		if in.ServiceID != "" && !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -192,7 +194,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	mcp.AddTool(s, tool("get_invoice", "Get an invoice",
 		"Returns one invoice: status, amounts in cents, payment attempts and its service. Does not start a payment.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in invoiceIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in invoiceIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.InvoiceID) {
 			return fail(msgBadInvoiceID)
 		}
@@ -201,7 +203,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	mcp.AddTool(s, tool("generate_endpoints", "Generate endpoints",
 		"Builds proxy connection lines for a service with the chosen protocol, format, location targeting and session type: one line, or up to 1,000 sticky sessions with session sticky. Does not change the service. The output contains the proxy username and password, which let anyone who has them use the service.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in endpointsIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in endpointsIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -216,8 +218,8 @@ func (t *tools) register(s *mcp.Server) {
 	})
 
 	mcp.AddTool(s, tool("check_connection", "Check connection",
-		"Sends one request through the service from TrueProxies and reports the outcome and exit IP, to tell a proxy problem apart from a website refusing you. Does not measure speed. Limited to a few checks a minute.",
-		true), func(ctx context.Context, req *mcp.CallToolRequest, in checkIn) (*mcp.CallToolResult, any, error) {
+		"Sends one request through the service from TrueProxies and reports the outcome and exit IP, to tell a proxy problem apart from a website refusing you. It counts as use of the service: it uses a little traffic and starts an unused free trial. Does not measure speed. Limited to a few checks a minute.",
+		false, true), func(ctx context.Context, req *mcp.CallToolRequest, in checkIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -227,7 +229,7 @@ func (t *tools) register(s *mcp.Server) {
 
 	mcp.AddTool(s, tool("list_trusted_ips", "List trusted IPs",
 		"Lists the trusted IPs of a service: addresses allowed to connect without the proxy password.",
-		false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
+		true, false), func(ctx context.Context, req *mcp.CallToolRequest, in serviceIn) (*mcp.CallToolResult, any, error) {
 		if !uuidPattern.MatchString(in.ServiceID) {
 			return fail(msgBadServiceID)
 		}
@@ -330,6 +332,33 @@ func logCall(name string, err error, rid string, start time.Time) {
 		status = 0
 	}
 	log.Printf("tool=%s status=%d request_id=%s duration=%s", name, status, rid, time.Since(start).Round(time.Millisecond))
+}
+
+// providerFields are supplier balances in the usage response. They are not the
+// customer's traffic, so they stay out of the tool result.
+var providerFields = []string{"gb_allocated", "gb_remaining", "gb_used", "provider_observed_at", "provider_usage_informational", "reconciliation"}
+
+// without removes top-level fields from a successful JSON tool result.
+func without(res *mcp.CallToolResult, fields ...string) *mcp.CallToolResult {
+	if res.IsError || len(res.Content) == 0 {
+		return res
+	}
+	tc, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return res
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal([]byte(tc.Text), &m) != nil {
+		return res
+	}
+	for _, f := range fields {
+		delete(m, f)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return res
+	}
+	return text(b)
 }
 
 func text(b []byte) *mcp.CallToolResult {
