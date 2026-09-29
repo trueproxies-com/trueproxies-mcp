@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.trueproxies/mcp",
+  "title": "TrueProxies",
+  "description": "Plans, services, usage, invoices, endpoints and connection checks for your TrueProxies account",
+  "version": "1.0.0",
+  "websiteUrl": "https://trueproxies.com",
+  "repository": { "url": "https://github.com/trueproxies-com/trueproxies-mcp", "source": "github" },
+  "icons": [{ "src": "https://trueproxies.com/icon-512.png", "mimeType": "image/png", "sizes": ["512x512"] }],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.trueproxies.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "TrueProxies API key as 'Bearer tp_api_...'. list_plans works without one.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string",
+          "placeholder": "Bearer tp_api_..."
+        }
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/trueproxies-com/trueproxies-mcp:1.0.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "TRUEPROXIES_API_KEY",
+          "description": "TrueProxies API key (tp_api_...). list_plans works without one.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
