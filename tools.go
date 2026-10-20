@@ -69,7 +69,7 @@ func tool(name, title, description string, readOnly, openWorld bool) *mcp.Tool {
 }
 
 type plansIn struct {
-	Product string `json:"product,omitempty" jsonschema:"Only this product: datacenter_ipv6, residential_ipv4_unlimited or residential_ipv4_gb"`
+	Product string `json:"product,omitempty" jsonschema:"Only this product: datacenter_ipv6, residential_ipv4_unlimited, residential_ipv4_unlimited_pro or residential_ipv4_gb"`
 	Term    string `json:"term,omitempty" jsonschema:"Only this billing term: hour, day, week or month. Traffic packs have no term."`
 }
 
@@ -108,7 +108,7 @@ type checkIn struct {
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
 	ASN       string `json:"asn,omitempty" jsonschema:"ASN digits without the AS prefix, if the service supports ASN targeting"`
 	Session   string `json:"session,omitempty" jsonschema:"Session type. sticky (Sticky) reuses an IP while available, for the session lifetime. rotate (Rotating) requests a new IP per connection, and the same IP can appear again. none uses the service default."`
-	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, only with session sticky: 60 to 86400, or from 1 when the service has session_lifetime_seconds, at most 1800 with session_lifetime_30m, and whole minutes on Residential IPv4 Unlimited"`
+	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, only with session sticky: 60 to 86400, or from 1 when the service has session_lifetime_seconds, at most 1800 with session_lifetime_30m, and whole minutes on Residential IPv4 Unlimited and Unlimited Pro"`
 }
 
 type endpointsIn struct {
@@ -121,7 +121,7 @@ type endpointsIn struct {
 	Region    string `json:"region,omitempty" jsonschema:"Region code, if the service supports region targeting"`
 	ASN       string `json:"asn,omitempty" jsonschema:"ASN digits without the AS prefix, if the service supports ASN targeting"`
 	Session   string `json:"session,omitempty" jsonschema:"Session type. sticky (Sticky) reuses an IP while available, for the session lifetime. rotate (Rotating) requests a new IP per connection, and the same IP can appear again. none uses the service default."`
-	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, only with session sticky: 60 to 86400, or from 1 when the service has session_lifetime_seconds, at most 1800 with session_lifetime_30m, and whole minutes on Residential IPv4 Unlimited"`
+	Lifetime  int    `json:"lifetime,omitempty" jsonschema:"Sticky session lifetime in seconds, only with session sticky: 60 to 86400, or from 1 when the service has session_lifetime_seconds, at most 1800 with session_lifetime_30m, and whole minutes on Residential IPv4 Unlimited and Unlimited Pro"`
 }
 
 // The values the API accepts, so clients can offer them and bad values fail
@@ -159,7 +159,7 @@ func with(t *mcp.Tool, s *jsonschema.Schema) *mcp.Tool {
 func (t *tools) register(s *mcp.Server) {
 	mcp.AddTool(s, with(tool("list_plans", "List plans and prices",
 		"Lists TrueProxies plans and traffic packs: price in US cents, term, speed, connection limits, traffic allowance and targeting capabilities. Also returns the cities available for city targeting and whether the free trial is open. Traffic packs (residential_ipv4_gb) have no term; their traffic is valid for 30 days. No API key needed.",
-		true, false), input[plansIn](map[string][]any{"product": {"datacenter_ipv6", "residential_ipv4_unlimited", "residential_ipv4_gb"}, "term": {"hour", "day", "week", "month"}}, nil)), t.listPlans)
+		true, false), input[plansIn](map[string][]any{"product": {"datacenter_ipv6", "residential_ipv4_unlimited", "residential_ipv4_unlimited_pro", "residential_ipv4_gb"}, "term": {"hour", "day", "week", "month"}}, nil)), t.listPlans)
 
 	mcp.AddTool(s, tool("get_account", "Get your account",
 		"Returns the TrueProxies account that owns the API key: account reference, email, role, status and billing details.",
